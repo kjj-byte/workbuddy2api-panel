@@ -8,13 +8,15 @@ import (
 )
 
 func (p *Trae) BeginBrowserLogin(ctx context.Context) (BrowserAuthorization, error) {
-	machine, device, state := identifier(), identifier(), identifier()
+	machine, device, trace := identifier(), identifier(), identifier()
 	clientID := "en1oxy7wnw8j9n"
 	return browserCallback(ctx, "/authorize", []string{"https://www.trae.cn", "https://trae.cn"}, func(callback string) string {
-		return "https://www.trae.cn/authorization?" + url.Values{"login_version": {"1"}, "auth_from": {"solo"}, "login_channel": {"native_ide"}, "plugin_version": {"2.3.62834"}, "auth_type": {"local"}, "client_id": {clientID}, "redirect": {"0"}, "login_trace_id": {(machine + device)[48:]}, "auth_callback_url": {callback + "?state=" + state}, "machine_id": {machine}, "device_id": {device}, "x_device_id": {device}, "x_machine_id": {machine}, "x_device_brand": {"PC"}, "x_device_type": {"PC"}, "x_os_version": {"1.0"}, "x_app_version": {traeVersion}, "x_app_type": {"stable"}}.Encode()
+		// TRAE rejects callback URLs containing a query or fragment. Its page
+		// echoes login_trace_id as loginTraceID, which binds this callback instead.
+		return "https://www.trae.cn/authorization?" + url.Values{"login_version": {"1"}, "auth_from": {"solo"}, "login_channel": {"native_ide"}, "plugin_version": {"2.3.62834"}, "auth_type": {"local"}, "client_id": {clientID}, "redirect": {"0"}, "login_trace_id": {trace}, "auth_callback_url": {callback}, "machine_id": {machine}, "device_id": {device}, "x_device_id": {device}, "x_machine_id": {machine}, "x_device_brand": {"PC"}, "x_device_type": {"PC"}, "x_os_version": {"1.0"}, "x_app_version": {traeVersion}, "x_app_type": {"stable"}}.Encode()
 	}, func(ctx context.Context, r *http.Request) (Credential, error) {
 		q := r.URL.Query()
-		if q.Get("state") != state {
+		if q.Get("loginTraceID") != trace {
 			return nil, errCallbackParameters
 		}
 		user := jsonParam(q.Get("userInfo"))

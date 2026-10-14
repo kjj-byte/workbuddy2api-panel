@@ -207,12 +207,26 @@ func TestTraeBrowserLoginExchangesAndPersistsDevice(t *testing.T) {
 	login, _ := url.Parse(auth.URL)
 	q := login.Query()
 	callback, _ := url.Parse(q.Get("auth_callback_url"))
-	if q.Get("auth_type") != "local" || q.Get("login_channel") != "native_ide" || len(q.Get("device_id")) != 32 || callback.Query().Get("state") == "" {
+	if q.Get("auth_type") != "local" || q.Get("login_channel") != "native_ide" || len(q.Get("device_id")) != 32 || len(q.Get("login_trace_id")) != 32 {
 		t.Fatal("incomplete TRAE login URL")
+	}
+	// The public authorization page accepts only a bare loopback /authorize URL.
+	if callback.Scheme != "http" || callback.Hostname() != "127.0.0.1" || callback.Port() == "" || callback.Path != "/authorize" || callback.RawQuery != "" || callback.Fragment != "" {
+		t.Fatal("TRAE authorization page would reject the callback URL")
 	}
 	params := callback.Query()
 	params.Set("refreshToken", "fake-refresh")
 	params.Set("userInfo", `{"UserID":"fallback-user"}`)
+	for _, trace := range []string{"", "wrong-trace"} {
+		params.Set("loginTraceID", trace)
+		if callbackGet(t, callback.String()+"?"+params.Encode()) != 400 {
+			t.Fatal("TRAE callback with missing or mismatched trace accepted")
+		}
+	}
+	if exchanges != 0 {
+		t.Fatal("invalid TRAE callback exchanged credentials")
+	}
+	params.Set("loginTraceID", q.Get("login_trace_id"))
 	callback.RawQuery = params.Encode()
 	if callbackGet(t, callback.String()) != 200 {
 		t.Fatal("TRAE callback failed")
