@@ -30,6 +30,7 @@ import (
 
 // Config handler 依赖。
 type Config struct {
+	Platforms PlatformBackend
 	Pool      *pool.Pool
 	Upstream  *upstream.Client
 	APIKey    string // 空 = 不鉴权（静态值；与 Live 同时给出时 Live 优先）
@@ -136,6 +137,9 @@ func NewHandler(cfg Config) *Handler {
 	}
 	h := &Handler{cfg: cfg, mux: http.NewServeMux()}
 	h.mux.HandleFunc("POST /v1/chat/completions", h.withAuth(h.chatCompletions))
+	h.mux.HandleFunc("POST /v1/responses", h.withAuth(h.responses))
+	h.mux.HandleFunc("POST /v1/messages", h.withAnthropicAuth(h.messages))
+	h.mux.HandleFunc("POST /messages", h.withAnthropicAuth(h.messages))
 	h.mux.HandleFunc("GET /v1/models", h.withAuth(h.models))
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
 	h.mux.HandleFunc("GET /healthz", h.healthz)
@@ -277,9 +281,20 @@ const (
 // models 返回模型列表：纯动态（缓存 10min），失败/无号返回空列表（无静态兜底——
 // 拉不出目录即意味着上游不可用，假名单只会让客户端选到 11102 的模型）。
 func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
+	rows := h.modelList()
+	if h.cfg.Platforms != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		extra, err := h.cfg.Platforms.Models(ctx)
+		cancel()
+		if err != nil {
+			w.Header().Set("X-Platforms-Status", "unavailable")
+		} else {
+			rows = append(rows, extra...)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
-		"data":   h.modelList(),
+		"data":   rows,
 	})
 }
 
@@ -524,6 +539,14 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		Model  string `json:"model"`
 	}
 	_ = json.Unmarshal(body, &peek)
+	if provider, _, qualified := strings.Cut(peek.Model, "/"); qualified && isPlatformProvider(provider) {
+		if h.cfg.Platforms == nil {
+			writeOpenAIError(w, http.StatusServiceUnavailable, "platforms_disabled", "原生 Go 平台功能尚未启用")
+			return
+		}
+		h.platformChat(w, r, body, provider, peek.Stream)
+		return
+	}
 
 	// 工具名名单：上游在没有 tools 的请求里会把工具调用吐成原生标记文本
 	// （见 upstream/dsml.go），修复层用它做严格判定。名单来自「本请求声明的 tools」
@@ -534,11 +557,26 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// realm 前缀解析（D6）：model 名可能带 "[realm:]" 前缀。剥出 realm + bareModel，
 	// bareModel 用于选号/粘性/出站 body 重写（前缀是网关侧路由协议，上游只认裸名）。
-	// 裸名 → ("cn", 原串)，CN 现状零回归。
-	realm, bareModel := resolveModel(peek.Model)
+	// 裸名 → ("cn", 原串)，realmExplicit=false。
+	//
+	// realmExplicit=false（裸名）时 realm 只是**默认偏好**而非硬约束：选号会先按它
+	// 过滤，选不到再回落全域。原因见 resolveModelSpec 注释（Codex 桌面端会把
+	// "global:gpt-6-sol" 写回裸名 "gpt-6-sol"，硬按 cn 过滤 → 全池 4 个健康号都在
+	// global，却报 no_healthy_account）。显式前缀（"cn:"/"global:"）仍是硬约束。
+	realm, bareModel, realmExplicit := resolveModelSpec(peek.Model)
+	// realmFallbackOK：该 realm 只是默认偏好（裸名），选号选不到时允许跨域回落。
+	// 显式前缀不做回落——用户写了 "cn:" 就说明他明确要 CN 出口。realm=="" 时
+	// 本来就没有域约束（老语义），回落分支不会被触发。
+	realmFallbackOK := !realmExplicit && realm != ""
 	modelRate := ""
 	if h.cfg.Upstream != nil {
 		modelRate = h.cfg.Upstream.ModelRate(realm, bareModel)
+		if modelRate == "" && !realmExplicit {
+			// 裸名默认域没有该模型倍率：回落全域（多为 global 独占模型，
+			// 如 gpt-6-sol / gpt-6.1-sol）。仅影响账本倍率与积分保底判据，
+			// 不改路由——路由由上面的选号回落决定。
+			modelRate = h.cfg.Upstream.ModelRate("global", bareModel)
+		}
 	}
 
 	// 请求级统计：出口即打一行表格日志（任何路径都会走到）。
@@ -744,9 +782,10 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		var acct *auth.Auth
 		if stickyUID != "" {
 			acct = h.cfg.Pool.PickByUIDForModel(stickyUID, bareModel)
-			if acct == nil || (realm != "" && acct.Realm() != realm) {
+			if acct == nil || (realm != "" && acct.Realm() != realm && !realmFallbackOK) {
 				// 粘性号在当前模型不可用（冷却/占满/该模型被 6004 限额）或 realm 不符 → 解绑，
-				// 本次回落普通轮换。
+				// 本次回落普通轮换。裸名（realmFallbackOK）时不因跨域解绑：裸名的 realm
+				// 只是默认偏好，粘性号只要**这个模型**能用就继续用，否则每轮都白解绑一次。
 				unbindSticky()
 				acct = nil
 			}
@@ -755,6 +794,15 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			// 模型感知 + realm 感知选号：模型非空时启用 6004 模型级冷却豁免
 			// （healthyForModel），realm 谓词过滤跨域账号。
 			acct = h.cfg.Pool.PickExcludingForRealm(tried, bareModel, realm)
+			if acct == nil && realmFallbackOK {
+				// 裸名的域回落：默认域（cn）里没有能服务该模型的号时放开域约束。
+				// 这是 Codex 桌面端场景的正解——它启动时把 config.toml 的
+				// "global:gpt-6-sol" 写回裸名 "gpt-6-sol"，而该模型**只在 global
+				// 域存在**；硬按 cn 过滤会让 4 个健康号全被滤掉，报
+				// no_healthy_account（读作"池里没号"），与真实成因（该模型不在
+				// 默认域）完全不符，且手改配置也拦不住客户端下次启动再改写。
+				acct = h.cfg.Pool.PickExcludingForRealm(tried, bareModel, "")
+			}
 		}
 		if acct == nil {
 			st.status = http.StatusServiceUnavailable
@@ -763,6 +811,8 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			//   (b) 号都在，但每个号都对这个模型处于模型级冷却（11102/6004）。
 			// 两者此前都报 no_healthy_account，导致「模型不可用」被读成「号全挂了」。
 			// 在这里取一次快照，供下方错误构造区分（issue #102 附带发现 1）。
+			// ModelBlocked 本身跨 realm 判定（任意域还有号能服务即非阻塞），
+			// 与上面的域回落口径一致。
 			modelBlock = h.cfg.Pool.ModelBlocked(bareModel)
 			break
 		}

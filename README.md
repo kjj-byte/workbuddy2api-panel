@@ -1,3 +1,35 @@
+## 此分支：8 个可签到渠道的原生 Go 接入
+
+在原有腾讯 CodeBuddy 国内版账号池上，新增 CodeArts、有道 LobsterAI、Qoder 国际版、Qoder 中国版、TRAE、Loomy、MiniMax Code 共 7 个适配。签到、余额、账号续期与模型转发均在同一个 Go 进程内运行，不需要 Node、WASM 运行时或 `run-platforms.ps1`。
+
+| 渠道 | 账号接入 | 每日领取与模型调用 |
+|---|---|---|
+| 腾讯 CodeBuddy 国内版 | 原有账号页登录 | 保留原有签到调度、积分池和调用方式 |
+| Loomy | 面板短信登录／导入 | Go 原生适配 |
+| MiniMax Code | 面板设备授权／导入 | Go 原生适配 |
+| Qoder 国际版／中国版 | 面板设备授权／导入 | Go 原生签名与协议；当前文本输入 |
+| CodeArts | 面板浏览器授权／导入 | Go 原生 PKCE／DPoP 登录、签名与协议，仅积分账户可领每日活动 |
+| 有道 LobsterAI | 面板浏览器登录／导入 | Go 原生回调换取凭据与模型适配 |
+| TRAE | 面板浏览器登录／导入 | Go 原生客户端本地授权，保存设备身份与轮换令牌 |
+
+启用方式：配置加入 `"platforms": {"enabled": true, "data_dir": "./data/platforms-go"}`，启动 Go 程序后打开 `/panel/#platforms`。示例配置已启用；旧配置默认关闭，也可在面板启用后重启。腾讯国内版仍在原账号页管理，其定时开关在原配置页；新渠道页面的总开关只控制新增的 7 个渠道。
+
+Windows 从源码构建：`go build -trimpath -ldflags="-s -w" -o wb2api.exe ./cmd/server`，再运行 `./wb2api.exe -config config.json`。Linux 可用 `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o wb2api ./cmd/server`。网页所需静态资源已嵌入二进制。
+
+新增渠道启动 30 秒后检查，随后每分钟检查；按 UTC+8、逐账号持久化当日记录，成功账号当天不再自动领取，失败或暂无活动的账号 30 分钟后重试。停用账号不自动签到。Qoder 每日活动 10:00 刷新，10:00 前的领取结果不会阻止刷新后的补领。Loomy 的永久积分保护可在面板开启。
+
+导入凭据：选择渠道 →「导入登录凭据」→ 填入原项目的凭据 JSON。CodeArts 需要 `access_key_id`、`secret_access_key`、`security_token`，续期还需要原来的 `refresh_token`、`code_verifier`、`dpop_private_key_jwk`；其他平台使用 `access_token` 及各自的刷新、身份字段。Qoder 推理必须有 `uid`；TRAE 应保留 `device_id`、`machine_id` 和正确的 `client_id`；LobsterAI 续期应保留 `uuid`、`first_keyfrom`、`latest_keyfrom`。也可导入 `dsh-codearts-auth/backup` v1 账号备份，未支持的平台会明确列为跳过。凭据文件及导出的备份包含秘密，请妥善保管。
+
+模型 ID 使用 `渠道/模型`，例如 `loomy/<模型ID>`、`minimax/<模型ID>`、`qodercn/<模型ID>`。在「模型开关」读取实际目录，不编造模型 ID。可通过 `/v1/chat/completions`、`/v1/responses`、`/v1/messages` 调用，沿用网关 API Key。腾讯继续使用原有裸模型名或 `cn:` 前缀。
+
+CodeArts、LobsterAI、TRAE 可在面板点击「添加账号」打开对应平台的官方授权页。登录完成后，由 Go 进程监听的临时本地回调交换并保存凭据，面板自动刷新账号列表。浏览器与 Go 程序需要在同一台机器上；回调仅监听 `127.0.0.1`，登录完成、超时或程序停止后关闭。CodeArts 支持 PKCE／DPoP 与旧票据回退；TRAE 使用官方客户端本地授权流程。
+
+验证边界：签名、幂等领取、积分口径、账号持久化、跨天调度、工具调用、流式错误、三种入站协议及三个浏览器登录的本地模拟交换已通过测试。没有使用真实平台账号发短信、领取积分或消耗额度；各平台真实可用性、资格与到账仍需账号实测。
+
+协议来源及 MIT 许可见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。
+
+---
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/WorkBuddy.png" alt="WorkBuddy2API" width="120">
 </p>
@@ -45,11 +77,11 @@
 
 ## 项目简介
 
-WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾讯 CodeBuddy（`copilot.tencent.com`）账号包装为统一的 `/v1/chat/completions` 服务。
+WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾讯 CodeBuddy（`copilot.tencent.com`）账号包装为统一服务。入站支持 `chat_completions`（`POST /v1/chat/completions`）、`codex_responses`（`POST /v1/responses`）与 `anthropic_messages`（`POST /v1/messages`，同样接受 `POST /messages`）。
 
 - 官方不提供 OpenAI 形态的开放 API，本项目通过 **OAuth 设备授权**（面板「添加账号」或 `login.sh`）获取账号凭证，在网关侧做 token 自动刷新、账号池调度与流量治理；
 - 面向 **个人多账号** 场景：多账号共享、单号故障自动换号、冷却 / 熔断防止雪崩、会话粘性保证多轮上下文不跳号；
-- 对客户端只暴露 OpenAI 兼容接口，现有 SDK / 前端 / 工具 **零改造接入**。
+- 对客户端暴露 `chat_completions`、`codex_responses` 与 `anthropic_messages`。模型名原样交给上游，不把 `claude-*` 改写成别的模型。
 
 > ⚠️ 合规须知：本项目是**非官方**网关，使用 CodeBuddy 账号作为上游，**仅限本人授权账号、本机 / 私有环境测试**。详细边界见[安全与合规](#安全与合规)。
 
@@ -192,7 +224,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 
 ```mermaid
 flowchart LR
-    Client["客户端 / SDK\nOpenAI 兼容请求"] --> H
+    Client["客户端 / SDK / Codex / Claude\nchat_completions · codex_responses · anthropic_messages"] --> H
 
     subgraph GWI["WorkBuddy2API 网关 :7863"]
         H["HTTP Handler\n鉴权 · 请求体上限 · 提示词改写 · 轮转"] --> P
@@ -209,7 +241,7 @@ flowchart LR
     U -->|"billing / auth / growth"| CB
 ```
 
-上游请求在出站前经历统一的改写管线（`internal/upstream/payload.go`）：强制 `stream:true`、`developer` 角色归一、tool_choice 归一、`image_url` 字符串兼容为 OpenAI 对象形态、DeepSeek 思维链注入、`reasoning_effort` 档位降级、`reasoning_content` 回填、指纹脱敏。
+上游请求在出站前经历统一的改写管线（`internal/upstream/payload.go`）：强制 `stream:true`、`developer` 角色归一、tool_choice 归一、`image_url` 字符串兼容为 OpenAI 对象形态、DeepSeek 思维链注入、`reasoning_effort` 档位降级、`reasoning_content` 回填、指纹脱敏。`codex_responses` 与 `anthropic_messages` 在 Handler 转成 `chat_completions` 再进这条管线，上游仍是 `chat/completions` SSE。
 
 ## 快速开始
 
@@ -333,17 +365,35 @@ curl -s http://localhost:7863/v1/models -H "Authorization: Bearer your-api-key"
 # 账号状态（汇总 + 每账号详情，disabled 账号透出 disabled_reason）
 curl -s http://localhost:7863/status -H "Authorization: Bearer your-api-key"
 
-# 流式聊天
+# chat_completions 流式
 curl -sN http://localhost:7863/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"stream":true}'
 
-# 非流式聊天（本地聚合）
+# chat_completions 非流式（本地聚合）
 curl -s http://localhost:7863/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"stream":false}'
+
+# codex_responses 流式
+curl -sN http://localhost:7863/v1/responses \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","input":"hi","stream":true}'
+
+# codex_responses 非流式
+curl -s http://localhost:7863/v1/responses \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","input":"hi","stream":false}'
+
+# anthropic_messages 流式（官方 SDK 用 x-api-key）
+curl -sN http://localhost:7863/v1/messages \
+  -H "x-api-key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","max_tokens":64,"messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```
 
 ## 配置说明
@@ -687,7 +737,9 @@ http://127.0.0.1:7863/panel/
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| `POST /v1/chat/completions` | Bearer（`api_key` 非空时） | OpenAI 兼容补全；流式/非流式；请求体上限 8 MiB |
+| `POST /v1/chat/completions` | Bearer（`api_key` 非空时） | `chat_completions`：OpenAI 兼容补全；流式/非流式；请求体上限 8 MiB |
+| `POST /v1/responses` | Bearer（`api_key` 非空时） | `codex_responses`：Codex Responses 入站，转成现有 chat 完成并回写 Responses 事件流。不保存 `previous_response_id` / `store` |
+| `POST /v1/messages`、`POST /messages` | Bearer 或 `x-api-key`（`api_key` 非空时） | `anthropic_messages`：Anthropic Messages 入站，转成现有 chat 完成并回写 Messages JSON / SSE。不回传 thinking（上游没有 signature） |
 | `GET /v1/models` | Bearer（`api_key` 非空时） | 模型列表（纯动态拉取，缓存 1h；失败返回空列表 + 5min 负缓存）；每模型带 `context_length`/`max_output_tokens`（四级查找链：上游目录 → 内置知识表 → model.json 缓存 → models.dev）、`reasoning_supported_efforts`/`reasoning_default_effort` 思考档位及描述/标签/倍率等全字段（上游有返回时） |
 | `GET /status` | Bearer（`api_key` 非空时） | 账号状态汇总 + 每账号详情（积分/冷却/熔断/在途/粘性）+ `model_locks`（按「域 + 模型」聚合的限流视图：可选 / 总数、锁定账号数、`state`、最早解锁与全池解锁时间、限流原因；无锁定为空） |
 | `GET /healthz` | 无 | 健康检查：有 healthy 且未占满账号返回 200，否则 503；响应带身份标识（见下） |

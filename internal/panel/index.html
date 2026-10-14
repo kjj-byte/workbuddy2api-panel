@@ -599,6 +599,7 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
       <li><a href="#accounts" data-view="accounts" class="on">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="5.5" r="2.6"/><path d="M2.8 13.5c.6-2.6 2.7-4 5.2-4s4.6 1.4 5.2 4"/></svg>
         账号池</a></li>
+      <li><a href="#platforms" data-view="platforms"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg>原生 Go 渠道</a></li>
       <li><a href="#usage" data-view="usage">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 13.5h12"/><path d="M4.5 13.5V8.2M8 13.5V3.5M11.5 13.5v-3"/></svg>
         用量</a></li>
@@ -637,6 +638,18 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
       <button class="primary" id="btnAdd">添加账号</button>
     </div>
 
+    <section class="view" id="view-platforms" hidden>
+      <div class="box"><header><h3>原生 Go · 账号与每日额度</h3><span class="grow"></span><button id="pfReload">刷新渠道</button><button id="pfImport">导入备份</button><button id="pfExport">导出备份</button></header>
+      <div class="pad"><p class="hint">账号接入、积分领取和模型调用全部在当前 Go 进程执行。腾讯账号继续在原账号池管理；这里仅显示已完成原生迁移的平台。</p>
+      <div id="pfState" role="status" style="margin:12px 0"></div><div id="pfCards" style="display:flex;flex-wrap:wrap;gap:8px;margin:16px 0"></div>
+      <div id="pfActions" hidden style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+        <button id="pfLogin" class="primary">添加账号</button><button id="pfCredential">导入登录凭据</button><button id="pfBalance">刷新余额</button><button id="pfClaim">领取今日额度</button><button id="pfModels">模型开关</button>
+        <label><input type="checkbox" id="pfAuto"> 自动签到</label><label id="pfLockWrap" hidden><input type="checkbox" id="pfLock"> 锁定永久积分</label>
+      </div><div id="pfLoginState" role="status"></div><div id="pfResult" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0"></div>
+      <div class="tbl-wrap"><table><thead><tr><th>账号</th><th>状态</th><th>额度</th><th>操作</th></tr></thead><tbody id="pfAccounts"></tbody></table></div>
+      <div id="pfModelList" style="margin-top:16px"></div><input type="file" id="pfBackupFile" accept=".json,application/json" hidden>
+      </div></div>
+    </section>
     <!-- 账号池 -->
     <section class="view" id="view-accounts">
       <div class="stats">
@@ -1259,5 +1272,6 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
 <div id="toasts"></div>
 
 <script src="app.js"></script>
+<script src="platforms.js"></script>
 </body>
 </html>

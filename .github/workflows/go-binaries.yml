@@ -83,11 +83,11 @@ jobs:
           case "${{ matrix.goos }}" in
             windows)
               NAME="wb2api-panel-v${V}-windows-amd64.zip"
-              zip -q "$NAME" wb2api.exe config.example.json README.md
+              zip -q "$NAME" wb2api.exe config.example.json README.md LICENSE THIRD_PARTY_NOTICES
               ;;
             *)
               NAME="wb2api-panel-v${V}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
-              tar czf "$NAME" wb2api config.example.json README.md
+              tar czf "$NAME" wb2api config.example.json README.md LICENSE THIRD_PARTY_NOTICES
               ;;
           esac
           echo "name=$NAME" >> "$GITHUB_ENV"
