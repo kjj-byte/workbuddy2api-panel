@@ -12,15 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/linguo2625469/workbuddy2api-panel/internal/platforms"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/prompt"
 )
 
 // Config 顶层配置。
 type Config struct {
-	Listen    string `json:"listen"`     // ":7863"
-	APIKey    string `json:"api_key"`    // 空 = 不鉴权
-	AuthDir   string `json:"auth_dir"`   // ./auths
-	StateFile string `json:"state_file"` // ./data/state.json
+	Platforms platforms.Config `json:"platforms"`
+	Listen    string           `json:"listen"`     // ":7863"
+	APIKey    string           `json:"api_key"`    // 空 = 不鉴权
+	AuthDir   string           `json:"auth_dir"`   // ./auths
+	StateFile string           `json:"state_file"` // ./data/state.json
 
 	Panel struct {
 		// PackageDetailLimit 积分构成页单账号默认展示的最近到期包数；<=0 回落 5。

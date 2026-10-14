@@ -20,6 +20,7 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/auth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/panel"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/platforms"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/redisstore"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
@@ -262,7 +263,21 @@ func main() {
 		log.Printf("[reqlog] 请求指标已启用；JSONL 归档已关闭")
 	}
 
+	var nativePlatforms *platforms.Client
+	if cfg.Platforms.Enabled {
+		platformCfg := cfg.Platforms
+		if platformCfg.DataDir == "" {
+			platformCfg.DataDir = stateSibling(cfg.StateFile, "platforms-go")
+		}
+		nativePlatforms, err = platforms.Start(context.Background(), platformCfg)
+		if err != nil {
+			log.Fatalf("initialize native Go platforms: %v", err)
+		}
+		defer nativePlatforms.Close()
+		log.Printf("[platforms] 原生 Go 平台适配已启用，无外部运行时")
+	}
 	pn := panel.New(panel.Config{
+		Platforms:   nativePlatforms,
 		Pool:        p,
 		Usage:       rec,
 		RequestLog:  requestLog,
@@ -291,7 +306,12 @@ func main() {
 	log.SetOutput(io.MultiWriter(os.Stderr, pn.Logs()))
 	server.SetChatLogOutput(io.MultiWriter(os.Stdout, pn.Logs()))
 
+	var platformBackend server.PlatformBackend
+	if nativePlatforms != nil {
+		platformBackend = nativePlatforms
+	}
 	h := server.NewHandler(server.Config{
+		Platforms:    platformBackend,
 		Pool:         p,
 		Upstream:     up,
 		APIKey:       cfg.APIKey,
@@ -533,7 +553,7 @@ func restartRequiredFields(c *Config) []string {
 	}
 	out = append(out, "session_sticky.ttl", "session_sticky.gc_interval")
 	out = append(out, "logging.request_archive_enabled", "logging.request_retention_days", "logging.request_archive_max_mb")
-	out = append(out, "server.read_timeout")
+	out = append(out, "server.read_timeout", "platforms")
 	return out
 }
 

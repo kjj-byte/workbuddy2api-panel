@@ -24,6 +24,7 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/auth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/httpauth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/platforms"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/scheduler"
@@ -33,6 +34,7 @@ import (
 
 // Config 面板依赖（main 装配注入）。
 type Config struct {
+	Platforms *platforms.Client
 	Pool      *pool.Pool
 	Upstream  *upstream.Client
 	Scheduler *scheduler.Scheduler // 手动触发签到/保活；nil 时对应接口返回 501
@@ -147,6 +149,11 @@ func New(cfg Config) *Panel {
 func (p *Panel) Logs() *Ring { return p.logs }
 
 func (p *Panel) routes() {
+	p.mux.HandleFunc("GET /panel/platforms.js", p.platformScript)
+	p.mux.HandleFunc("GET /panel/api/platforms", p.withAuth(p.platformState))
+	p.mux.HandleFunc("POST /panel/api/platforms/rpc", p.withAuth(p.platformRPC))
+	p.mux.HandleFunc("POST /panel/api/platforms/schedule", p.withAuth(p.platformSchedule))
+	p.mux.HandleFunc("POST /panel/api/platforms/checkin", p.withAuth(p.platformCheckin))
 	p.mux.HandleFunc("GET /panel/{$}", p.index)
 	p.mux.HandleFunc("GET /panel/app.js", p.appScript)
 	p.mux.HandleFunc("GET /panel/api/overview", p.withAuth(p.overview))
