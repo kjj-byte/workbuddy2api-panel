@@ -553,6 +553,47 @@ func (c *Client) beginLogin(ctx context.Context, provider string) (any, error) {
 		c.sessions.Store(id, session)
 		return success(map[string]any{"accountId": id, "loginMode": "sms"}), nil
 	}
+	if browser, ok := adapter.(BrowserAdapter); ok {
+		loginCtx, cancel := context.WithDeadline(c.ctx, session.expires)
+		auth, err := browser.BeginBrowserLogin(loginCtx)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		c.sessions.Store(id, session)
+		go func() {
+			defer cancel()
+			var result LoginResult
+			select {
+			case result = <-auth.Result:
+			case <-loginCtx.Done():
+				result.Err = loginCtx.Err()
+			}
+			if result.Err == nil {
+				result.Err = validatePlatformCredential(provider, result.Credential)
+			}
+			if result.Err == nil && loginCtx.Err() != nil {
+				result.Err = loginCtx.Err()
+			}
+			if result.Err == nil {
+				nickname := str(result.Credential["nickname"])
+				if nickname == "" {
+					nickname = str(result.Credential["user_name"])
+				}
+				if nickname == "" {
+					nickname = provider + " " + id[len(id)-6:]
+				}
+				result.Err = c.saveAccount(Account{ID: id, Provider: provider, Nickname: nickname, Enabled: true, CreatedAt: c.now().UnixMilli(), Credential: result.Credential})
+			}
+			session.mu.Lock()
+			session.done = true
+			if result.Err != nil {
+				session.err = result.Err.Error()
+			}
+			session.mu.Unlock()
+		}()
+		return success(map[string]any{"accountId": id, "loginUrl": auth.URL, "loginMode": "browser"}), nil
+	}
 	device, ok := adapter.(DeviceAdapter)
 	if !ok {
 		return nil, fmt.Errorf("该平台只支持导入凭据")

@@ -25,7 +25,7 @@ func NewLobsterAI() *LobsterAI {
 	return &LobsterAI{network: defaultNetwork("https://lobsterai-server.youdao.com", ""), versionURL: "https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update"}
 }
 func (*LobsterAI) Info() Provider {
-	return Provider{"lobsterai", "LobsterAI (有道龙虾)", "credit", true, true, "import"}
+	return Provider{"lobsterai", "LobsterAI (有道龙虾)", "credit", true, true, "browser"}
 }
 
 var lobsterVersionPattern = regexp.MustCompile(`^\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?$`)

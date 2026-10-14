@@ -31,7 +31,7 @@ func NewCodeArts() *CodeArts {
 	return &CodeArts{network: defaultNetwork("https://snap-access.cn-north-4.myhuaweicloud.com", "https://sts.cn-north-4.myhuaweicloud.com/v1/oauth2/tokens"), gateway: "https://opengw.developer.huaweicloud.com/api/v1/gateway/config", benefits: map[string]bool{"glm-5.3-flash": true, "deepseek-v4.1-flash": true}}
 }
 func (*CodeArts) Info() Provider {
-	return Provider{"codearts", "CodeArts Agent (华为)", "credit", true, true, "import"}
+	return Provider{"codearts", "CodeArts Agent (华为)", "credit", true, true, "browser"}
 }
 func hashHex(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
 func huaweiHeaders(c Credential, method, address string, body []byte, extra map[string]string, now time.Time) (http.Header, error) {
@@ -266,6 +266,13 @@ func (p *CodeArts) Chat(ctx context.Context, c Credential, body map[string]any, 
 	return streamOpenAI(ctx, p.chat, address, h, out, receive)
 }
 func (p *CodeArts) Refresh(ctx context.Context, c Credential) (Credential, error) {
+	if str(c["refresh_token"]) == "" || str(c["code_verifier"]) == "" {
+		return nil, fmt.Errorf("CodeArts 缺少续期材料")
+	}
+	form := url.Values{"client_id": {"codearts-agent"}, "code_verifier": {str(c["code_verifier"])}, "grant_type": {"refresh_token"}, "refresh_token": {str(c["refresh_token"])}}
+	return p.tokenRequest(ctx, c, form)
+}
+func (p *CodeArts) tokenRequest(ctx context.Context, c Credential, form url.Values) (Credential, error) {
 	jwk := obj(c["dpop_private_key_jwk"])
 	decode := func(k string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(str(jwk[k])) }
 	d, e := decode("d")
@@ -291,9 +298,6 @@ func (p *CodeArts) Refresh(ctx context.Context, c Credential) (Credential, error
 	if expectedX.Cmp(pub.X) != 0 || expectedY.Cmp(pub.Y) != 0 {
 		return nil, fmt.Errorf("CodeArts DPoP 公私钥不匹配")
 	}
-	if str(c["refresh_token"]) == "" || str(c["code_verifier"]) == "" {
-		return nil, fmt.Errorf("CodeArts 缺少续期材料")
-	}
 	enc := base64.RawURLEncoding.EncodeToString
 	head := enc(jsonBytes(map[string]any{"alg": "ES256", "typ": "dpop+jwt", "jwk": map[string]any{"kty": "EC", "crv": "P-256", "x": str(jwk["x"]), "y": str(jwk["y"])}}))
 	payload := enc(jsonBytes(map[string]any{"htm": "POST", "htu": p.auth, "iat": time.Now().Unix(), "jti": identifier() + identifier()}))
@@ -307,7 +311,6 @@ func (p *CodeArts) Refresh(ctx context.Context, c Credential) (Credential, error
 	r.FillBytes(signature[:32])
 	s.FillBytes(signature[32:])
 	h := http.Header{"Dpop": {signing + "." + enc(signature)}, "Content-Type": {"application/x-www-form-urlencoded"}}
-	form := url.Values{"client_id": {"codearts-agent"}, "code_verifier": {str(c["code_verifier"])}, "grant_type": {"refresh_token"}, "refresh_token": {str(c["refresh_token"])}}
 	raw, err := p.request(ctx, "POST", p.auth, h, []byte(form.Encode()))
 	if err != nil {
 		return nil, err

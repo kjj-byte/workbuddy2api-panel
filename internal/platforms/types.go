@@ -100,6 +100,17 @@ type DeviceAdapter interface {
 	BeginLogin(context.Context) (DeviceAuthorization, error)
 	PollLogin(context.Context, DeviceAuthorization) (Credential, bool, error)
 }
+type LoginResult struct {
+	Credential Credential
+	Err        error
+}
+type BrowserAuthorization struct {
+	URL    string
+	Result <-chan LoginResult
+}
+type BrowserAdapter interface {
+	BeginBrowserLogin(context.Context) (BrowserAuthorization, error)
+}
 type RemoteError struct {
 	Message string
 	Status  int

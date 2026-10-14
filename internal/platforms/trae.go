@@ -22,7 +22,7 @@ func NewTrae() *Trae {
 	return &Trae{network: defaultNetwork("https://trae-api-cn.mchost.guru", "https://api.trae.com.cn"), ug: "https://api.trae.cn", channels: map[string]string{}}
 }
 func (*Trae) Info() Provider {
-	return Provider{"trae", "TRAE (字节)", "credit", true, true, "import"}
+	return Provider{"trae", "TRAE (字节)", "credit", true, true, "browser"}
 }
 
 const traeVersion = "0.1.61"
