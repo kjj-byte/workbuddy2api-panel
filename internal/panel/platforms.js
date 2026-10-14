@@ -33,7 +33,7 @@ async function loadPlatforms() {
     }
     $('pfState').innerHTML = '<label><input type="checkbox" id="pfGlobalAuto"' + (pfState.enabled ? ' checked' : '') + '> 每日自动签到</label> <span class="hint">启动 30 秒后检查，按账号独立记录，跨天继续运行，失败 30 分钟后重试。</span>';
     $('pfGlobalAuto').onchange = e => pfRun(async () => { await api('platforms/schedule',{method:'POST',body:JSON.stringify({enabled:e.target.checked})}); await loadPlatforms(); });
-    $('pfCards').innerHTML = '<a href="#accounts" class="btn">CodeBuddy 国内版（原账号池） ↗</a>' + pfState.providers.map(p => '<button class="' + (p.id===pfSelected?'primary':'') + '" data-provider="'+esc(p.id)+'">'+esc(p.name)+'</button>').join('');
+    $('pfCards').innerHTML = pfState.providers.map(p => '<button class="' + (p.id===pfSelected?'primary':'') + '" data-provider="'+esc(p.id)+'">'+esc(p.name)+'</button>').join('');
     $('pfCards').querySelectorAll('button').forEach(button => button.onclick = () => { if (pfBusy) return; pfSelected=button.dataset.provider; pfBalances.clear(); $('pfLoginState').replaceChildren(); $('pfModelList').replaceChildren(); $('pfResult').textContent=''; loadPlatforms(); });
     $('pfActions').hidden=false; pfRenderActions();
     const p = pfState.providers.find(row=>row.id===pfSelected);
